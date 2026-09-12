@@ -13,6 +13,7 @@ SHEET_ID = os.environ["SHEET_ID"]
 IDEAS_THREAD_ID = os.environ.get("IDEAS_THREAD_ID", "").strip()
 
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
+YOUTUBE_ID_RE = re.compile(r"(?:v=|youtu\.be/|/shorts/|/embed/|/live/)([\w-]{11})")
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -63,7 +64,7 @@ def detect_platform(link):
 
 
 def extract_youtube_video_id(link):
-    match = re.search(r"(?:v=|youtu\.be/)([\w-]{11})", link)
+    match = YOUTUBE_ID_RE.search(link)
     return match.group(1) if match else None
 
 
@@ -154,6 +155,7 @@ def process_message(message):
         metadata["views"],
         metadata["likes"],
         notes,
+        "",
         "",
     ]
 
