@@ -11,6 +11,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 YOUTUBE_API_KEY = os.environ["YOUTUBE_API_KEY"]
 SHEET_ID = os.environ["SHEET_ID"]
 IDEAS_THREAD_ID = os.environ.get("IDEAS_THREAD_ID", "").strip()
+DATA_SHEET_NAME = os.environ.get("DATA_SHEET_NAME", "content-tracker-sheet-template")
 
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 YOUTUBE_ID_RE = re.compile(r"(?:v=|youtu\.be/|/shorts/|/embed/|/live/)([\w-]{11})")
@@ -35,7 +36,13 @@ def get_state_and_data_worksheets(gc):
         state_ws.update("A1", [["last_update_id"]])
         state_ws.update("A2", [["0"]])
 
-    data_ws = sh.sheet1
+    try:
+        data_ws = sh.worksheet(DATA_SHEET_NAME)
+    except gspread.WorksheetNotFound:
+        print(f"WARNING: worksheet '{DATA_SHEET_NAME}' not found by name, "
+              f"falling back to the first tab (sh.sheet1). Check DATA_SHEET_NAME / tab name.")
+        data_ws = sh.sheet1
+
     return state_ws, data_ws
 
 
@@ -54,7 +61,7 @@ def set_last_update_id(state_ws, update_id):
 def detect_platform(link):
     if re.search(r"youtube\.com|youtu\.be", link, re.IGNORECASE):
         return "youtube"
-    if re.search(r"instagram\.com", link, re.IGNORECASE):
+    if re.search(r"instagram\.com|instagr\.am", link, re.IGNORECASE):
         return "instagram"
     if re.search(r"tiktok\.com", link, re.IGNORECASE):
         return "tiktok"
@@ -116,16 +123,20 @@ def process_message(message):
     text = message.get("text") or message.get("caption") or ""
     url_match = URL_RE.search(text)
     if not url_match:
+        preview = text[:80] + ("..." if len(text) > 80 else "")
+        print(f"Skipped (no URL found) thread={message.get('message_thread_id')!r} text={preview!r}")
         return None
 
     link = url_match.group(0)
     platform = detect_platform(link)
     if not platform:
+        print(f"Skipped (unrecognized platform) thread={message.get('message_thread_id')!r} link={link!r}")
         return None
 
     if IDEAS_THREAD_ID:
         thread_id = message.get("message_thread_id")
         if str(thread_id) != IDEAS_THREAD_ID:
+            print(f"Skipped (wrong thread: got {thread_id!r}, expected {IDEAS_THREAD_ID!r}) link={link!r}")
             return None
 
     sender = get_sender_name(message)
@@ -145,6 +156,8 @@ def process_message(message):
     if not metadata:
         metadata = {"title": "", "thumbnail": "", "views": "", "likes": ""}
 
+    print(f"Matched ({platform}) thread={message.get('message_thread_id')!r} link={link!r}")
+
     return [
         date_shared,
         sender,
@@ -163,6 +176,7 @@ def process_message(message):
 def main():
     gc = get_sheets_client()
     state_ws, data_ws = get_state_and_data_worksheets(gc)
+    print(f"Writing to worksheet: '{data_ws.title}'")
     last_update_id = get_last_update_id(state_ws)
 
     resp = requests.get(
@@ -172,6 +186,8 @@ def main():
     )
     resp.raise_for_status()
     updates = resp.json().get("result", [])
+
+    print(f"Fetched {len(updates)} update(s) since last_update_id={last_update_id}.")
 
     if not updates:
         print("No new Telegram messages.")
@@ -184,6 +200,7 @@ def main():
         highest_update_id = max(highest_update_id, update["update_id"])
         message = update.get("message") or update.get("edited_message") or update.get("channel_post")
         if not message:
+            print(f"Skipped update {update['update_id']} (no message/edited_message/channel_post key)")
             continue
 
         row = process_message(message)
