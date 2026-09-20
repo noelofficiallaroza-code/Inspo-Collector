@@ -208,10 +208,14 @@ def main():
             rows_to_append.append(row)
 
     if rows_to_append:
-        data_ws.append_rows(rows_to_append, value_input_option="USER_ENTERED")
-        print(f"Appended {len(rows_to_append)} row(s).")
-    else:
-        print("No supported links in this batch.")
+    data_ws.append_rows(
+        rows_to_append,
+        value_input_option="USER_ENTERED",
+        table_range="A1:K1",
+    )
+    print(f"Appended {len(rows_to_append)} row(s).")
+else:
+    print("No supported links in this batch.")
 
     set_last_update_id(state_ws, highest_update_id)
 
