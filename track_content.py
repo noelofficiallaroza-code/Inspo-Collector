@@ -208,12 +208,14 @@ def main():
             rows_to_append.append(row)
 
     if rows_to_append:
-        data_ws.append_rows(
+        col_a_values = data_ws.col_values(1)
+        next_row = len(col_a_values) + 1
+        data_ws.update(
+            f"A{next_row}",
             rows_to_append,
             value_input_option="USER_ENTERED",
-            table_range="A1:K1",
         )
-        print(f"Appended {len(rows_to_append)} row(s).")
+        print(f"Appended {len(rows_to_append)} row(s) starting at row {next_row}.")
     else:
         print("No supported links in this batch.")
 
