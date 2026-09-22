@@ -11,6 +11,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 YOUTUBE_API_KEY = os.environ["YOUTUBE_API_KEY"]
 SHEET_ID = os.environ["SHEET_ID"]
 IDEAS_THREAD_ID = os.environ.get("IDEAS_THREAD_ID", "").strip()
+IDEAS_CHAT_ID = os.environ.get("IDEAS_CHAT_ID", "").strip()
 DATA_SHEET_NAME = os.environ.get("DATA_SHEET_NAME", "content-tracker-sheet-template")
 
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
@@ -132,6 +133,12 @@ def process_message(message):
     if not platform:
         print(f"Skipped (unrecognized platform) thread={message.get('message_thread_id')!r} link={link!r}")
         return None
+
+    if IDEAS_CHAT_ID:
+        chat_id = (message.get("chat") or {}).get("id")
+        if str(chat_id) != IDEAS_CHAT_ID:
+            print(f"Skipped (wrong chat: got {chat_id!r}, expected {IDEAS_CHAT_ID!r}) link={link!r}")
+            return None
 
     if IDEAS_THREAD_ID:
         thread_id = message.get("message_thread_id")
