@@ -25,4 +25,5 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           IDEAS_THREAD_ID: ${{ secrets.IDEAS_THREAD_ID }}
+          IDEAS_CHAT_ID: ${{ secrets.IDEAS_CHAT_ID }}
         run: python track_content.py
