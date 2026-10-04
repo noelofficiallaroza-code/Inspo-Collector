@@ -1,6 +1,8 @@
+import hashlib
 import json
 import os
 import re
+import subprocess
 from datetime import datetime, timezone
 
 import requests
@@ -11,8 +13,11 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 YOUTUBE_API_KEY = os.environ["YOUTUBE_API_KEY"]
 SHEET_ID = os.environ["SHEET_ID"]
 IDEAS_THREAD_ID = os.environ.get("IDEAS_THREAD_ID", "").strip()
-IDEAS_CHAT_ID = os.environ.get("IDEAS_CHAT_ID", "").strip()
 DATA_SHEET_NAME = os.environ.get("DATA_SHEET_NAME", "content-tracker-sheet-template")
+
+REPO = os.environ.get("GITHUB_REPOSITORY", "")
+BRANCH = os.environ.get("GITHUB_REF_NAME", "main")
+THUMBS_DIR = "thumbs"
 
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 YOUTUBE_ID_RE = re.compile(r"(?:v=|youtu\.be/|/shorts/|/embed/|/live/)([\w-]{11})")
@@ -106,12 +111,64 @@ def fetch_ytdlp_metadata(link):
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(link, download=False)
 
+    thumb = info.get("thumbnail") or ""
+    if not thumb:
+        thumbs = info.get("thumbnails") or []
+        if thumbs:
+            thumb = thumbs[-1].get("url", "")
+
     return {
         "title": info.get("title", ""),
-        "thumbnail": info.get("thumbnail", ""),
+        "thumbnail": thumb,
         "views": info.get("view_count", ""),
         "likes": info.get("like_count", ""),
     }
+
+
+def save_thumbnail(link, thumb_url):
+    """Download the thumbnail into thumbs/ and return a permanent raw.githubusercontent URL."""
+    if not thumb_url or not REPO:
+        return None
+    try:
+        r = requests.get(thumb_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        ctype = r.headers.get("Content-Type", "")
+        ext = "png" if "png" in ctype else "webp" if "webp" in ctype else "jpg"
+        name = hashlib.sha1(link.encode()).hexdigest()[:16] + "." + ext
+        os.makedirs(THUMBS_DIR, exist_ok=True)
+        with open(os.path.join(THUMBS_DIR, name), "wb") as f:
+            f.write(r.content)
+        return f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/{THUMBS_DIR}/{name}"
+    except Exception as exc:  # noqa: BLE001
+        print(f"Failed to save thumbnail for {link}: {exc}")
+        return None
+
+
+def push_thumbnails():
+    if not os.path.isdir(THUMBS_DIR):
+        return
+
+    def run(*cmd):
+        subprocess.run(cmd, check=True)
+
+    run("git", "config", "user.name", "github-actions[bot]")
+    run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
+    run("git", "add", THUMBS_DIR)
+    pending = subprocess.run(
+        ["git", "status", "--porcelain", THUMBS_DIR], capture_output=True, text=True
+    ).stdout.strip()
+    if not pending:
+        return
+    run("git", "commit", "-m", "Add thumbnails")
+    for attempt in range(3):
+        try:
+            run("git", "pull", "--rebase", "origin", BRANCH)
+            run("git", "push", "origin", f"HEAD:{BRANCH}")
+            print("Pushed thumbnails.")
+            return
+        except subprocess.CalledProcessError as exc:
+            print(f"git push attempt {attempt + 1} failed: {exc}")
+    raise RuntimeError("Could not push thumbnails to the repo")
 
 
 def get_sender_name(message):
@@ -133,12 +190,6 @@ def process_message(message):
     if not platform:
         print(f"Skipped (unrecognized platform) thread={message.get('message_thread_id')!r} link={link!r}")
         return None
-
-    if IDEAS_CHAT_ID:
-        chat_id = (message.get("chat") or {}).get("id")
-        if str(chat_id) != IDEAS_CHAT_ID:
-            print(f"Skipped (wrong chat: got {chat_id!r}, expected {IDEAS_CHAT_ID!r}) link={link!r}")
-            return None
 
     if IDEAS_THREAD_ID:
         thread_id = message.get("message_thread_id")
@@ -162,6 +213,12 @@ def process_message(message):
 
     if not metadata:
         metadata = {"title": "", "thumbnail": "", "views": "", "likes": ""}
+
+    if platform != "youtube" and metadata["thumbnail"]:
+        hosted = save_thumbnail(link, metadata["thumbnail"])
+        metadata["thumbnail"] = hosted or metadata["thumbnail"]
+    elif platform != "youtube":
+        print(f"No thumbnail returned for {link}")
 
     print(f"Matched ({platform}) thread={message.get('message_thread_id')!r} link={link!r}")
 
@@ -215,6 +272,7 @@ def main():
             rows_to_append.append(row)
 
     if rows_to_append:
+        push_thumbnails()
         col_a_values = data_ws.col_values(1)
         next_row = len(col_a_values) + 1
         data_ws.update(
